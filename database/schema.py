@@ -52,8 +52,7 @@ class Table:
 
 
 class Schema:
-    def __init__(self, name: str, tables: list[Table]):
-        self.name = name
+    def __init__(self, *tables: Table):
         for table in tables:
             tables_with_same_name = [table for t in tables if t.name == table.name]
             if len(tables_with_same_name) > 1:
@@ -65,7 +64,7 @@ class Schema:
         for key, _ in kwargs.items():
             if not any([column.name == key for column in table.columns]):
                 return False, f"Key '{key}' doesn't exist in table '{table.name}'"
-        if not any([table.primary_key[0] == key for key, _ in kwargs.items()]):
+        if not any([table.primary_key[0] == key for key, _ in kwargs.items()]) and table.primary_key[1] == False:
             return False, f"Primary key '{table.primary_key[0]}' not set"
         return True, None
     def get_table(self, name: str):
@@ -91,4 +90,4 @@ class Schema:
                 continue
 
             formatted_values.append(str(value))
-        return f'INSERT INTO {table_name} ({", ".join(keys)}) VALUES ({", ".join(formatted_values)})'
+        return f'INSERT OR IGNORE INTO {table_name} ({", ".join(keys)}) VALUES ({", ".join(formatted_values)})'

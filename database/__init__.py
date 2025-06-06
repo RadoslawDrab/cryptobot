@@ -21,6 +21,7 @@ class Database:
     def insert(self, table: str, **kwargs: any):
         sql = self.schema.insert(table, **kwargs)
         self.c.execute(sql)
+        self.__connection.commit()
     def close(self):
         self.__connection.close()
     def backup(self, name: str | None = None):
