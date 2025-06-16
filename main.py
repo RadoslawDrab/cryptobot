@@ -1,10 +1,12 @@
-from bot import Bot, Symbol
+from flask import Flask
+from schema import get_api
 
-def init():
-    bot = Bot([
-        Symbol('BTCUSDT', 'Bitcoin', 'USDT'),
-    ])
-    bot.watch()
+app = Flask(__name__)
+
+api = get_api(app)
+
+
 
 if __name__ == '__main__':
-    init()
+    api.create_tree()
+    app.run()
