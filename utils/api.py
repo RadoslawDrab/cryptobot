@@ -2,6 +2,7 @@ import uuid
 from typing import Self, Callable
 from pathlib import Path
 from flask import Flask
+import importlib
 import re
 
 class ApiRule:
@@ -49,6 +50,25 @@ class ApiEndpoint:
     If you want to add new endpoint just create new ``ApiEndpoint`` valid variable.
     """
     METHODS = ('GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTION')
+    ERROR_CODES = [
+        (200, 'Ok'),
+        (201, 'Created'),
+        (202, 'Accepted'),
+        (301, 'Moved Permanently'),
+        (302, 'Found'),
+        (304, 'Not Modified'),
+        (307, 'Temporary Redirect'),
+        (308, 'Permanent Redirect'),
+        (400, 'Bad Request'),
+        (401, 'Unauthorized'),
+        (403, 'Forbidden'),
+        (404, 'Not Found'),
+        (405, 'Method Not Allowed'),
+        (500, 'Internal Server Error'),
+        (501, 'Not Implemented'),
+        (502, 'Bad Gateway'),
+        (503, 'Service Unavailable')
+    ]
     def __init__(self, keys: list[str | ApiRule], children: list[Self] | None = None , methods: list[str] | None = None, callback: Callable[[dict], str | dict] | None = None, app: Flask | None = None):
         if methods is not None:
             for method in methods:
@@ -108,24 +128,33 @@ class ApiEndpoint:
         # File content for __init__.py
         file_content = [
             "from flask import request",
-            "\n",
+            "{IMPORTS}"
             "# PATH: {PATH}",
             '# METHODS: {METHODS}',
             "def init({PARAMS}):",
             "   return"
         ]
 
-        def endpoint(main_path: str, data: dict):
+        all_endpoints: list[dict] = []
+
+        def make_view_func(f):
+            return lambda **kwargs: {**ApiEndpoint.get_status(200), **(f(**kwargs) or ApiEndpoint.get_status(501))} if f else ApiEndpoint.get_error(501)
+        def endpoint(main_path: str, data: dict, paths: list[str], queries: list[ApiRule]):
             """
             Creates recursive endpoint for each path
             :param main_path: Starting path
             :param data: Path data. Includes keys: ``path`` (current path), ``children`` (direct children), ``methods`` (available methods), ``query`` (any query parameters), ``callback`` (callback for this route)
+            :param paths: Current parent paths
+            :param queries: Current query parameters
             :return: None
             """
             data_path = data.get('path')
             children = data.get('children') or []
             methods = data.get('methods') or []
             query: list[ApiRule] = data.get('query') or []
+
+            current_paths = [re.sub(r'^/+', '', p) for p in [*paths, data_path] if p and p != '/']
+            current_path = "/" + "/".join(current_paths)
 
             # Name for current path
             name = '' if data_path == '/' else ApiEndpoint.format_path(data_path).lower()
@@ -138,34 +167,43 @@ class ApiEndpoint:
             if not Path.exists(file_path):
                 with open(file_path, 'w') as f:
                     # Maps each query parameter with valid python type
-                    func_params = [f'{q.path}: {ApiRule.map_type(q.type)}' for q in query]
+                    func_params = [f'{q.path}: {ApiRule.map_type(q.type)}' for q in [*query, *queries]]
+                    func_params.append('**kwargs')
+                    uuid_present = any(q.type == 'uuid' for q in query)
                     f.write("\n".join(file_content).format(
                         PATH=data_path,
                         METHODS=" | ".join(methods),
-                        PARAMS=", ".join(func_params))
-                    )
+                        PARAMS=", ".join(func_params),
+                        IMPORTS="" if not uuid_present else "import uuid"
+                    ))
             # Adds url rule if app is present and actual route doesn't exist already
             if self._app and not self.route_exists(data_path):
                 # Path relative to current working directory separated by dot. Path for python import path
                 relative_path = ".".join(folder_path.relative_to(Path.cwd()).as_posix().split('/'))
                 # Specific python module
-                module = __import__(str(relative_path))
+                module = importlib.import_module(str(relative_path))
 
+                func = getattr(module, self.callback_name, None)
                 # Checks if module contains init function
-                if hasattr(module, self.callback_name):
-                    # Adds Flask url rule for path
-                    self._app.add_url_rule(
-                        data_path,
-                        endpoint=f"{data_path}_{id(data)}",
-                        view_func=lambda **kwargs: module.init(kwargs),
-                        methods=methods
-                    )
+                # if hasattr(module, self.callback_name):
+                all_endpoints.append({
+                    'rule': current_path,
+                    'endpoint': f"{current_path}_{id(data)}",
+                    'view_func': make_view_func(func),
+                    'methods': methods
+                })
 
             for child in children:
                 # Creates endpoint for direct children
-                endpoint(str(Path.joinpath(Path(main_path), './' + name)), child)
+                endpoint(str(Path.joinpath(Path(main_path), './' + name)), child, current_paths, [*queries, *query])
 
-        endpoint('./', endpoints)
+        endpoint(str(Path('./')), endpoints, ['/'], [])
+
+        if self._app:
+            all_endpoints.sort(key=lambda d: d.get('rule'), reverse=True)
+            for endpoint in all_endpoints:
+                # Adds Flask url rule for path
+                self._app.add_url_rule(**endpoint)
     def create_endpoints(self):
         """Creates url endpoints for API"""
 
@@ -204,6 +242,12 @@ class ApiEndpoint:
             )
         return self.path
 
+    @staticmethod
+    def get_status(code: int, message: str | None = None):
+        return {'status': {'code': code, 'message': message if message else [m for c, m in ApiEndpoint.ERROR_CODES if c == code][0]}}
+    @staticmethod
+    def get_error(code: int, message: str | None = None):
+        return ApiEndpoint.get_status(code, message), code
     @staticmethod
     def format_path(path: str):
         """
