@@ -1,9 +1,9 @@
-import uuid
 from typing import Self, Callable
 from pathlib import Path
 from flask import Flask
 import importlib
 import re
+import json
 
 class ApiRule:
     CONVERTER_TYPES = (('string', 'str'), ('int', 'int'), ('float', 'float'), ('path', 'str'), ('uuid', 'uuid.UUID'))
@@ -92,6 +92,33 @@ class ApiEndpoint:
     def path(self):
         """Gets joint path"""
         return '/' + "/".join(self._formatted_keys)
+    @property
+    def tree(self):
+        def get_path(endpoint: dict):
+            path = endpoint.get('path')
+            children = endpoint.get('children')
+            info  = {
+                'path': re.sub('<', '[', re.sub('>', ']', path)),
+                'methods': endpoint.get('methods'),
+                'children': []
+            }
+            for child in children:
+                info['children'].append(get_path(child))
+            return info
+        return get_path(self.create_endpoints())
+
+    @property
+    def html_tree(self):
+        """
+        HTML presenting tree view of an API
+        """
+        return f"""
+            <div style="display: block; max-width: 600px; margin: 0 auto;">
+                <h1>Tree View</h1>
+                <hr />
+                <pre>{json.dumps(self.tree, indent=2)}</pre>
+            </div>
+            """
     @property
     def callback_name(self):
         return 'init'
@@ -268,7 +295,7 @@ class ApiEndpoint:
         if self._app is None:
             raise RuntimeError('Flask app not found')
 
-        if self.callback:
+        if self.callback and not self.route_exists(self.path):
             self._app.add_url_rule(
                 self.path,
                 endpoint=f"{self.path}_{id(self)}",
