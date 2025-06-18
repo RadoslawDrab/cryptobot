@@ -128,30 +128,63 @@ class ApiEndpoint:
         # File content for __init__.py
         file_content = [
             "from flask import request",
-            "{IMPORTS}"
+            "{IMPORTS}",
+            "",
             "# PATH: {PATH}",
             '# METHODS: {METHODS}',
             "def init({PARAMS}):",
             "   return"
         ]
 
+        def endpoint_kwargs(info: dict) -> dict[str, tuple[str, str | None, any]]:
+            return {
+                'api': ('ApiEndpoint', 'utils.api', self),
+                'path': ('str', None, info.get('path'))
+            }
+
         all_endpoints: list[dict] = []
 
-        def make_view_func(f):
-            return lambda **kwargs: {**ApiEndpoint.get_status(200), **(f(**kwargs) or ApiEndpoint.get_status(501))} if f else ApiEndpoint.get_error(501)
-        def endpoint(main_path: str, data: dict, paths: list[str], queries: list[ApiRule]):
+        def make_view_func(f, info: dict):
+            def func(**kwargs):
+                if not f:
+                    # Not implemented
+                    return ApiEndpoint.get_error(501)
+                try:
+                    data = f(**kwargs, **{key: value for key, (_, _, value) in endpoint_kwargs(info).items()})
+                    if type(data) == dict:
+                        return {
+                            **ApiEndpoint.get_status(200),
+                            **data
+                        }
+                    # HTML
+                    elif type(data) == str:
+                        return data
+                    # Not implemented
+                    else:
+                        return ApiEndpoint.get_error(501)
+                # Some error
+                except TypeError as e:
+                    return ApiEndpoint.get_error(500, str(e))
+            return func
+        def endpoint(main_path: str, data: dict, paths: list[str], queries: list[ApiRule], kwargs: dict[str, tuple[str, str | None, any]] | None = None):
             """
             Creates recursive endpoint for each path
             :param main_path: Starting path
             :param data: Path data. Includes keys: ``path`` (current path), ``children`` (direct children), ``methods`` (available methods), ``query`` (any query parameters), ``callback`` (callback for this route)
             :param paths: Current parent paths
             :param queries: Current query parameters
+            :param kwargs: Keyword arguments to pass to endpoint. ``dict[PARAM_NAME,tuple[TYPE,IMPORT_PATH,VALUE]]``
             :return: None
             """
             data_path = data.get('path')
             children = data.get('children') or []
             methods = data.get('methods') or []
             query: list[ApiRule] = data.get('query') or []
+            endpoint_info = {
+                'path': data_path,
+                'methods': methods,
+            }
+            kwargs = kwargs or endpoint_kwargs(endpoint_info)
 
             current_paths = [re.sub(r'^/+', '', p) for p in [*paths, data_path] if p and p != '/']
             current_path = "/" + "/".join(current_paths)
@@ -168,13 +201,17 @@ class ApiEndpoint:
                 with open(file_path, 'w') as f:
                     # Maps each query parameter with valid python type
                     func_params = [f'{q.path}: {ApiRule.map_type(q.type)}' for q in [*query, *queries]]
+                    func_params.extend([f'{key}: {value_type}' for key, (value_type, import_path, *_) in kwargs.items()])
                     func_params.append('**kwargs')
                     uuid_present = any(q.type == 'uuid' for q in query)
                     f.write("\n".join(file_content).format(
                         PATH=data_path,
                         METHODS=" | ".join(methods),
                         PARAMS=", ".join(func_params),
-                        IMPORTS="" if not uuid_present else "import uuid"
+                        IMPORTS="\n".join([
+                            "" if not uuid_present else "import uuid",
+                            *[f'from {import_path} import {value_type}' for value_type, import_path, *_ in kwargs.values() if import_path is not None]
+                        ])
                     ))
             # Adds url rule if app is present and actual route doesn't exist already
             if self._app and not self.route_exists(data_path):
@@ -184,18 +221,16 @@ class ApiEndpoint:
                 module = importlib.import_module(str(relative_path))
 
                 func = getattr(module, self.callback_name, None)
-                # Checks if module contains init function
-                # if hasattr(module, self.callback_name):
                 all_endpoints.append({
                     'rule': current_path,
                     'endpoint': f"{current_path}_{id(data)}",
-                    'view_func': make_view_func(func),
+                    'view_func': make_view_func(func, endpoint_info),
                     'methods': methods
                 })
 
             for child in children:
                 # Creates endpoint for direct children
-                endpoint(str(Path.joinpath(Path(main_path), './' + name)), child, current_paths, [*queries, *query])
+                endpoint(str(Path.joinpath(Path(main_path), './' + name)), child, current_paths, [*queries, *query], kwargs)
 
         endpoint(str(Path('./')), endpoints, ['/'], [])
 
