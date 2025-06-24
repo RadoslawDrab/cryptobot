@@ -1,10 +1,48 @@
 from typing import Self, Callable
 from pathlib import Path
-from flask import Flask
+from flask import Flask, Request
 import importlib
 import re
 import json
 
+class ApiStatus(Exception):
+    ERROR_CODES = [
+        (200, 'Ok'),
+        (201, 'Created'),
+        (202, 'Accepted'),
+        (301, 'Moved Permanently'),
+        (302, 'Found'),
+        (304, 'Not Modified'),
+        (307, 'Temporary Redirect'),
+        (308, 'Permanent Redirect'),
+        (400, 'Bad Request'),
+        (401, 'Unauthorized'),
+        (403, 'Forbidden'),
+        (404, 'Not Found'),
+        (405, 'Method Not Allowed'),
+        (500, 'Internal Server Error'),
+        (501, 'Not Implemented'),
+        (502, 'Bad Gateway'),
+        (503, 'Service Unavailable')
+    ]
+    def __init__(self, code: int, message: str | None = None):
+        self.code = code
+        self.message = message
+    @property
+    def status(self):
+        return ApiStatus.get_status(self.code, self.message)
+
+    @staticmethod
+    def get_status(code: int, message: str | None = None):
+        return {
+            'status': {
+                'code': code,
+                'message': message if message else [m for c, m in ApiStatus.ERROR_CODES if c == code][0]
+            }
+        }
+    @staticmethod
+    def get_flask_error(code: int, message: str | None = None):
+        return ApiStatus.get_status(code, message), code
 class ApiRule:
     CONVERTER_TYPES = (('string', 'str'), ('int', 'int'), ('float', 'float'), ('path', 'str'), ('uuid', 'uuid.UUID'))
     def __init__(self, path: str, converter_type: str | None = None):
@@ -50,25 +88,6 @@ class ApiEndpoint:
     If you want to add new endpoint just create new ``ApiEndpoint`` valid variable.
     """
     METHODS = ('GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTION')
-    ERROR_CODES = [
-        (200, 'Ok'),
-        (201, 'Created'),
-        (202, 'Accepted'),
-        (301, 'Moved Permanently'),
-        (302, 'Found'),
-        (304, 'Not Modified'),
-        (307, 'Temporary Redirect'),
-        (308, 'Permanent Redirect'),
-        (400, 'Bad Request'),
-        (401, 'Unauthorized'),
-        (403, 'Forbidden'),
-        (404, 'Not Found'),
-        (405, 'Method Not Allowed'),
-        (500, 'Internal Server Error'),
-        (501, 'Not Implemented'),
-        (502, 'Bad Gateway'),
-        (503, 'Service Unavailable')
-    ]
     def __init__(self, keys: list[str | ApiRule], children: list[Self] | None = None , methods: list[str] | None = None, callback: Callable[[dict], str | dict] | None = None, app: Flask | None = None):
         if methods is not None:
             for method in methods:
@@ -176,14 +195,16 @@ class ApiEndpoint:
             def func(**kwargs):
                 if not f:
                     # Not implemented
-                    return ApiEndpoint.get_error(501)
+                    return ApiStatus.get_flask_error(501)
                 try:
                     data = f(**kwargs, **{key: value for key, (_, _, value) in info.items()})
+                    if isinstance(data, ApiStatus):
+                        return data.status
+                    if type(data) == tuple and type(data[1]) == int:
+                        return { **ApiStatus.get_status(data[1]), **data[0] }
                     if type(data) == dict:
-                        if data.get('status') is not None and type(data.get('status')) == dict:
-                            return data
                         return {
-                            **ApiEndpoint.get_status(200),
+                            **ApiStatus.get_status(200),
                             'data': data
                         }
                     # HTML
@@ -191,10 +212,10 @@ class ApiEndpoint:
                         return data
                     # Not implemented
                     else:
-                        return ApiEndpoint.get_error(501)
+                        return ApiStatus.get_flask_error(501)
                 # Some error
                 except TypeError as e:
-                    return ApiEndpoint.get_error(500, str(e))
+                    return ApiStatus.get_flask_error(500, str(e))
             return func
         def endpoint(main_path: str, data: dict, paths: list[str], queries: list[ApiRule], kwargs: dict[str, tuple[str, str | None, any]] | None = None):
             """
@@ -324,11 +345,18 @@ class ApiEndpoint:
         return self.path
 
     @staticmethod
-    def get_status(code: int, message: str | None = None):
-        return {'status': {'code': code, 'message': message if message else [m for c, m in ApiEndpoint.ERROR_CODES if c == code][0]}}
+    def get_body(request: Request, *keys: str):
+        if not request.is_json:
+            raise ApiStatus(400, 'Invalid body type')
+        data: dict = request.get_json(True)
+        ApiEndpoint.check_body(data, *keys)
+        return data
     @staticmethod
-    def get_error(code: int, message: str | None = None):
-        return ApiEndpoint.get_status(code, message), code
+    def check_body(body: dict, *keys: str):
+        missing_keys = [key for key in keys if body.get(key) is None]
+        if len(missing_keys) > 0:
+            raise ApiStatus(400, f"Body is missing keys: {missing_keys}")
+
     @staticmethod
     def format_path(path: str):
         """
