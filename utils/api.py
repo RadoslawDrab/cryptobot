@@ -139,10 +139,11 @@ class ApiEndpoint:
     def set_app(self, app: Flask | None):
         self._app = app
         return self
-    def create_tree(self):
+    def create_tree(self, **endpoint_kwargs: tuple[str, str | None, any]):
         """
         Creates tree API in ``api`` folder.\n
         For each endpoint creates folder with path name and ``__init__.py`` file with function name specified in ``callback_name`` with params if API endpoint has any params
+        :param endpoint_kwargs: Keyword arguments to pass to endpoint. ``dict[PARAM_NAME,tuple[TYPE,IMPORT_PATH,VALUE]]``
         """
         endpoints = self.create_endpoints()
 
@@ -163,7 +164,7 @@ class ApiEndpoint:
             "   return"
         ]
 
-        def endpoint_kwargs(info: dict) -> dict[str, tuple[str, str | None, any]]:
+        def get_endpoint_kwargs(info: dict) -> dict[str, tuple[str, str | None, any]]:
             return {
                 'api': ('ApiEndpoint', 'utils.api', self),
                 'path': ('str', None, info.get('path'))
@@ -171,17 +172,19 @@ class ApiEndpoint:
 
         all_endpoints: list[dict] = []
 
-        def make_view_func(f, info: dict):
+        def make_view_func(f, info: dict[str, tuple[str, str | None, any]]):
             def func(**kwargs):
                 if not f:
                     # Not implemented
                     return ApiEndpoint.get_error(501)
                 try:
-                    data = f(**kwargs, **{key: value for key, (_, _, value) in endpoint_kwargs(info).items()})
+                    data = f(**kwargs, **{key: value for key, (_, _, value) in info.items()})
                     if type(data) == dict:
+                        if data.get('status') is not None and type(data.get('status')) == dict:
+                            return data
                         return {
                             **ApiEndpoint.get_status(200),
-                            **data
+                            'data': data
                         }
                     # HTML
                     elif type(data) == str:
@@ -209,9 +212,9 @@ class ApiEndpoint:
             query: list[ApiRule] = data.get('query') or []
             endpoint_info = {
                 'path': data_path,
-                'methods': methods,
+                'methods': methods
             }
-            kwargs = kwargs or endpoint_kwargs(endpoint_info)
+            kwargs = {**get_endpoint_kwargs(endpoint_info), **kwargs}
 
             current_paths = [re.sub(r'^/+', '', p) for p in [*paths, data_path] if p and p != '/']
             current_path = "/" + "/".join(current_paths)
@@ -231,6 +234,7 @@ class ApiEndpoint:
                     func_params.extend([f'{key}: {value_type}' for key, (value_type, import_path, *_) in kwargs.items()])
                     func_params.append('**kwargs')
                     uuid_present = any(q.type == 'uuid' for q in query)
+
                     f.write("\n".join(file_content).format(
                         PATH=data_path,
                         METHODS=" | ".join(methods),
@@ -240,6 +244,21 @@ class ApiEndpoint:
                             *[f'from {import_path} import {value_type}' for value_type, import_path, *_ in kwargs.values() if import_path is not None]
                         ])
                     ))
+            else:
+                with open(file_path, 'r') as f:
+                    content = f.readlines()
+                    new_content = []
+                    for line in content:
+                        if line.startswith('# PATH: '):
+                            line = f'# PATH: {data_path}\n'
+                        if line.startswith('# METHODS: '):
+                            line = f'# METHODS: {" | ".join(methods)}\n'
+
+
+                        new_content.append(line)
+                    with open(file_path, 'w') as f:
+                        f.write("".join(new_content))
+
             # Adds url rule if app is present and actual route doesn't exist already
             if self._app and not self.route_exists(data_path):
                 # Path relative to current working directory separated by dot. Path for python import path
@@ -251,7 +270,7 @@ class ApiEndpoint:
                 all_endpoints.append({
                     'rule': current_path,
                     'endpoint': f"{current_path}_{id(data)}",
-                    'view_func': make_view_func(func, endpoint_info),
+                    'view_func': make_view_func(func, kwargs),
                     'methods': methods
                 })
 
@@ -259,7 +278,7 @@ class ApiEndpoint:
                 # Creates endpoint for direct children
                 endpoint(str(Path.joinpath(Path(main_path), './' + name)), child, current_paths, [*queries, *query], kwargs)
 
-        endpoint(str(Path('./')), endpoints, ['/'], [])
+        endpoint(str(Path('./')), endpoints, ['/'], [], endpoint_kwargs)
 
         if self._app:
             all_endpoints.sort(key=lambda d: d.get('rule'), reverse=True)
