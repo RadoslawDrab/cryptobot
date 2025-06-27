@@ -40,6 +40,7 @@ mail = Email(
 jwt = JWT(get_env('JWT_SECRET'))
 
 password_check_pattern = r'^(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])(?=.*[!@#$%^&*(),.?<>:;-_]).{8,}$'
+password_check_text = 'Password must be longer than 8 characters and include: lower and upper case character, number and special character'
 
 if __name__ == '__main__':
     api.create_tree(
