@@ -3,7 +3,6 @@ from pathlib import Path
 from flask import Flask, Request
 import importlib
 import re
-import json
 
 class ApiStatus(Exception):
     ERROR_CODES = [
@@ -125,19 +124,6 @@ class ApiEndpoint:
                 info['children'].append(get_path(child))
             return info
         return get_path(self.create_endpoints())
-
-    @property
-    def html_tree(self):
-        """
-        HTML presenting tree view of an API
-        """
-        return f"""
-            <div style="display: block; max-width: 600px; margin: 0 auto;">
-                <h1>Tree View</h1>
-                <hr />
-                <pre>{json.dumps(self.tree, indent=2)}</pre>
-            </div>
-            """
     @property
     def callback_name(self):
         return 'init'

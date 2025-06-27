@@ -24,6 +24,7 @@ db = Database('./data/database.db', 'schema.sql')
 template = TemplatesHandler(
     Template('site.info.html', 'info', 'title', 'message'),
     Template('site.password-reset.html', 'password-reset-form', 'error'),
+    Template('site.api-tree.html', 'api-tree', 'tree'),
     Template('mail.verify.html', 'verify-mail', 'link'),
     Template('mail.password-reset.html', 'password-reset-mail', 'link')
 )
