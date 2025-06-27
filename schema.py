@@ -20,7 +20,7 @@ def get_api(app: Flask):
                       methods=['GET', 'POST']
                   )
               ],
-              methods=['GET', 'POST', 'DELETE', 'PUT']
+              methods=['GET', 'POST', 'DELETE', 'PATCH']
           )
         ],
         app=app,
