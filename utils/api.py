@@ -160,7 +160,7 @@ class ApiEndpoint:
         return self
     def create_tree(self, **endpoint_kwargs: tuple[str, str | None, any]):
         """
-        Creates tree API in ``api`` folder.\n
+        Creates tree API in ``api`` folder.
         For each endpoint creates folder with path name and ``__init__.py`` file with function name specified in ``callback_name`` with params if API endpoint has any params
         :param endpoint_kwargs: Keyword arguments to pass to endpoint. ``dict[PARAM_NAME,tuple[TYPE,IMPORT_PATH,VALUE]]``
         """
@@ -289,7 +289,7 @@ class ApiEndpoint:
 
                 func = getattr(module, self.callback_name, None)
                 all_endpoints.append({
-                    'rule': current_path,
+                    'rule': '/api/' + current_path,
                     'endpoint': f"{current_path}_{id(data)}",
                     'view_func': make_view_func(func, kwargs),
                     'methods': methods
@@ -337,7 +337,7 @@ class ApiEndpoint:
 
         if self.callback and not self.route_exists(self.path):
             self._app.add_url_rule(
-                self.path,
+                '/api/' + self.path,
                 endpoint=f"{self.path}_{id(self)}",
                 view_func=lambda **kwargs: self.callback(kwargs),
                 methods=self.methods
