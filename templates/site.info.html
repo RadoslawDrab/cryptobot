@@ -1,0 +1,20 @@
+<!DOCTYPE>
+<html>
+<head>
+	{% if title %}
+	<title>{{ title }}</title>
+	{% else %}
+	<title>Info</title>
+	{% endif %}
+	<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Rubik:ital,wght@0,300..900;1,300..900&display=swap"
+				rel="stylesheet">
+</head>
+<body class="font-[Rubik] flex flex-col max-w-md mx-auto my-5 px-4 py-3 border-1 border-stone-200 rounded-sm">
+<h1 class="text-xl font-semibold mb-2 pb-2 color-stone-800 border-b-1 border-inherit">Cryptobot</h1>
+<p class="text-md font-medium mb-2">{{ message }}</p>
+<a href="/" class="text-blue-500 hover:text-blue-400 transition">Go to home page</a>
+</body>
+</html>
