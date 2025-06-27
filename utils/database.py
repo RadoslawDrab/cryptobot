@@ -36,8 +36,9 @@ class Database:
         return self._db
     def _execute(self, sql: str):
         try:
-            self._db.execute(sql)
+            cursor = self._db.execute(sql)
             self._db.commit()
+            return cursor
         except sqlite3.Error as e:
             for sql_code, code, message in Database.ERROR_CODES:
                 if sql_code == e.sqlite_errorcode:
@@ -51,6 +52,16 @@ class Database:
     def update(self, table: str, condition: str, **columns: any):
         sql = f"UPDATE {table} SET {", ".join([f'{column} = {Database.format(value)}' for column, value in columns.items()])} WHERE {condition};"
         self._execute(sql)
+    def delete(self, table: str, condition: str):
+        sql = f"DELETE FROM {table} WHERE {condition};"
+        self._execute(sql)
+    def select(self, table: str, *columns: str, condition: str | None = None, distinct: bool = False, order_by: tuple[str, bool] | None = None, one: bool = False) -> list[dict[str, any]] | dict[str, any] | None:
+        sql = f"SELECT {'DISTINCT ' if distinct else ''}{", ".join(columns) if len(columns) > 0 else '*' } FROM {table}{f' WHERE {condition}' if condition else ''}{f' ORDER BY {order_by[0]} {'ASC' if order_by[1] else 'DESC'}' if order_by else ''}"
+        cur = self._execute(sql)
+        rv: list[sqlite3.Row] = cur.fetchall()
+        cur.close()
+        rows = [{key: row[key] for key in row.keys()} for row in rv]
+        return (rows[0] if rows else None) if one else rows
     def query_one(self, query: str, args=()):
         v = self.query(query, args)
         return v[0] if v else None
